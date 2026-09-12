@@ -1,5 +1,3 @@
-import Image from 'next/image';
-
 type PhotographySlotProps = {
   index: string;
   title: string;
@@ -15,7 +13,14 @@ export function PhotographySlot({ index, title, note, ratio, className = '', src
   return (
     <figure className={`photo-slot photo-${ratio} ${src ? 'has-photo' : ''} ${className}`.trim()}>
       {src ? (
-        <Image className="photo-slot-image" src={src} alt={alt} fill sizes="(max-width: 980px) 100vw, 50vw" priority={priority} />
+        <img
+          className="photo-slot-image"
+          src={src}
+          alt={alt}
+          loading={priority ? 'eager' : 'lazy'}
+          fetchPriority={priority ? 'high' : 'auto'}
+          decoding="async"
+        />
       ) : (
         <><div className="photo-grid" aria-hidden="true" /><figcaption><span>PHOTO {index}</span><strong>{title}</strong><small>{note}</small></figcaption></>
       )}
