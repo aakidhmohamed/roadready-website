@@ -50,11 +50,11 @@ h1 span { display: block; }
 .photo-slot { min-height: 320px; position: relative; margin: 0; overflow: hidden; border: 1px solid #858177; background: #34342f; color: var(--white); }
 .photo-slot.has-photo { background: #252520; }
 .photo-slot.has-photo:before, .photo-slot.has-photo:after { display: none; }
-.photo-slot > img { width: 100%; height: 100%; display: block; object-fit: cover; }
-.hero-photo > img { object-position: 50% 50%; }
-.use-case-grid article:nth-child(1) .photo-slot > img { object-position: 50% 44%; }
-.use-case-grid article:nth-child(2) .photo-slot > img { object-position: 50% 46%; }
-.use-case-grid article:nth-child(3) .photo-slot > img { object-position: 50% 45%; }
+.photo-slot .photo-slot-image { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
+.hero-photo .photo-slot-image { object-position: 50% 50%; }
+.use-case-grid article:nth-child(1) .photo-slot .photo-slot-image { object-position: 50% 44%; }
+.use-case-grid article:nth-child(2) .photo-slot .photo-slot-image { object-position: 50% 46%; }
+.use-case-grid article:nth-child(3) .photo-slot .photo-slot-image { object-position: 50% 45%; }
 .photo-portrait { aspect-ratio: 4/5; }
 .photo-square { aspect-ratio: 1; }
 .photo-landscape { aspect-ratio: 4/3; }
