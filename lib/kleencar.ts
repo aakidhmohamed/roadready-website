@@ -29,7 +29,7 @@ export const PRODUCT_JOBS = [
 ] as const;
 
 // Populate only with verified business facts. Missing values are treated as unavailable.
-export const BUSINESS_DETAILS = { businessName: 'RoadReady', whatsappNumber: '94705312147', enquiryEndpoint: '', privacyUrl: '', responseExpectation: '' } as const;
+export const BUSINESS_DETAILS = { businessName: 'KleenCar', whatsappNumber: '94705312147', enquiryEndpoint: '', privacyUrl: '', responseExpectation: '' } as const;
 export const hasWhatsApp = Boolean(BUSINESS_DETAILS.whatsappNumber);
 export const hasEnquiryEndpoint = Boolean(BUSINESS_DETAILS.enquiryEndpoint);
 

@@ -1,0 +1,474 @@
+'use client';
+
+import { ReactNode, SyntheticEvent, useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check, MessageCircle } from 'lucide-react';
+import { trackKleenCarEvent, type KleenCarEvent } from '../../lib/analytics';
+import {
+  BUSINESS_DETAILS,
+  CAR_TYPES,
+  hasEnquiryEndpoint,
+  hasWhatsApp,
+  PRIORITIES,
+  recommendSetup,
+  SETUP_LEVELS,
+  SETUPS,
+  type QuizAnswers,
+  type SetupName,
+} from '../../lib/kleencar';
+
+type TrackedLinkProps = {
+  children: ReactNode;
+  className?: string;
+  href: string;
+  eventName: KleenCarEvent;
+};
+export function TrackedLink({
+  children,
+  className,
+  href,
+  eventName,
+}: TrackedLinkProps) {
+  return (
+    <a
+      className={className}
+      href={href}
+      onClick={() => trackKleenCarEvent(eventName)}
+    >
+      {children}
+    </a>
+  );
+}
+export function WhatsAppLink({
+  children,
+  className = '',
+  kitName,
+}: {
+  children: ReactNode;
+  className?: string;
+  kitName?: string;
+}) {
+  if (!hasWhatsApp) return null;
+  const text = kitName
+    ? `Hi KleenCar, I'd like to ask about the ${kitName} kit.`
+    : "Hi KleenCar, I'd like to ask about your car-cleaning kits.";
+  return (
+    <a
+      className={className}
+      href={`https://wa.me/${BUSINESS_DETAILS.whatsappNumber}?text=${encodeURIComponent(text)}`}
+      onClick={() =>
+        trackKleenCarEvent('whatsapp_clicked', { kitName: kitName ?? null })
+      }
+    >
+      {children}
+    </a>
+  );
+}
+type ModelContextDocument = Document & {
+  modelContext?: {
+    registerTool: (
+      tool: object,
+      options?: { signal?: AbortSignal },
+    ) => void | Promise<void>;
+  };
+};
+const questions = [
+  {
+    key: 'carType' as const,
+    eyebrow: 'STEP 1 · THE CAR',
+    title: 'WHAT ARE WE WORKING WITH?',
+    helper:
+      'Vehicle type helps us suggest the scope of a routine. It does not replace product-specific compatibility advice.',
+    options: CAR_TYPES,
+  },
+  {
+    key: 'priority' as const,
+    eyebrow: 'STEP 2 · THE FIRST WIN',
+    title: 'WHAT SHOULD FEEL BETTER FIRST?',
+    helper: 'Choose the result that would make the biggest difference to you.',
+    options: PRIORITIES,
+  },
+  {
+    key: 'level' as const,
+    eyebrow: 'STEP 3 · THE DEPTH',
+    title: 'HOW FAR DO YOU WANT TO GO?',
+    helper: 'Start lean, cover the main jobs, or take the broadest route.',
+    options: SETUP_LEVELS,
+  },
+];
+type EnquiryStatus = 'idle' | 'submitting' | 'success' | 'error';
+
+export function ConversionJourney() {
+  const [started, setStarted] = useState(false);
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState<Partial<QuizAnswers>>({});
+  const [complete, setComplete] = useState(false);
+  const [selectedSetup, setSelectedSetup] =
+    useState<SetupName>('New-to-You Reset');
+  const [enquiryStatus, setEnquiryStatus] = useState<EnquiryStatus>('idle');
+  const [enquiryMessage, setEnquiryMessage] = useState('');
+  const question = questions[step];
+  const recommendation = useMemo(
+    () =>
+      answers.carType && answers.priority && answers.level
+        ? recommendSetup(answers as QuizAnswers)
+        : null,
+    [answers],
+  );
+  const startQuiz = () => {
+    setStarted(true);
+    trackKleenCarEvent('quiz_started');
+    trackKleenCarEvent('quiz_step_viewed', { step: 1 });
+  };
+  const choose = (value: string) => {
+    setAnswers((current) => ({ ...current, [question.key]: value }));
+    trackKleenCarEvent('quiz_step_answered', {
+      step: step + 1,
+      question: question.key,
+    });
+  };
+  const next = () => {
+    if (!answers[question.key]) return;
+    if (step < questions.length - 1) {
+      const nextStep = step + 1;
+      setStep(nextStep);
+      trackKleenCarEvent('quiz_step_viewed', { step: nextStep + 1 });
+      return;
+    }
+    const result = recommendSetup(answers as QuizAnswers);
+    setSelectedSetup(result);
+    setComplete(true);
+    trackKleenCarEvent('quiz_completed');
+    trackKleenCarEvent('recommendation_viewed', { recommendation: result });
+  };
+  const reset = () => {
+    setStarted(false);
+    setComplete(false);
+    setStep(0);
+    setAnswers({});
+  };
+  const submitEnquiry = async (event: SyntheticEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (enquiryStatus === 'submitting' || !hasEnquiryEndpoint) return;
+    const form = event.currentTarget;
+    const payload = Object.fromEntries(new FormData(form).entries());
+    setEnquiryStatus('submitting');
+    setEnquiryMessage('Sending your enquiry…');
+    trackKleenCarEvent('enquiry_attempted', { package: selectedSetup });
+    try {
+      const response = await fetch(BUSINESS_DETAILS.enquiryEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...payload,
+          selectedSetup,
+          source: 'kleencar-website',
+        }),
+      });
+      if (!response.ok) throw new Error();
+      setEnquiryStatus('success');
+      setEnquiryMessage(
+        'Thanks—your enquiry was received. We will reply through your preferred contact method.',
+      );
+      trackKleenCarEvent('enquiry_accepted', { package: selectedSetup });
+    } catch {
+      setEnquiryStatus('error');
+      setEnquiryMessage(
+        'Your details were not sent. Please check your connection and try again.',
+      );
+      trackKleenCarEvent('enquiry_failed', { package: selectedSetup });
+    }
+  };
+  useEffect(() => {
+    const context = (document as ModelContextDocument).modelContext;
+    if (!context?.registerTool) return;
+    const lifecycle = new AbortController();
+    void Promise.resolve(
+      context.registerTool(
+        {
+          name: 'configure_car_care_setup',
+          title: 'Configure a KleenCar car-care setup',
+          description:
+            'Answer the visible fit-check and reveal a KleenCar setup recommendation.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              carType: { type: 'string', enum: [...CAR_TYPES] },
+              priority: { type: 'string', enum: [...PRIORITIES] },
+              level: { type: 'string', enum: [...SETUP_LEVELS] },
+            },
+            required: ['carType', 'priority', 'level'],
+            additionalProperties: false,
+          },
+          annotations: { readOnlyHint: false, untrustedContentHint: false },
+          execute(input: unknown) {
+            const value = input as QuizAnswers;
+            if (
+              !CAR_TYPES.includes(value?.carType) ||
+              !PRIORITIES.includes(value?.priority) ||
+              !SETUP_LEVELS.includes(value?.level)
+            )
+              throw new Error(
+                'Choose a valid car type, priority and setup level.',
+              );
+            const result = recommendSetup(value);
+            setStarted(true);
+            setAnswers(value);
+            setStep(2);
+            setSelectedSetup(result);
+            setComplete(true);
+            return { recommendation: result, status: 'shown' };
+          },
+        },
+        { signal: lifecycle.signal },
+      ),
+    ).catch(() => undefined);
+    return () => lifecycle.abort();
+  }, []);
+  const packageDetails = SETUPS.find((setup) => setup.name === selectedSetup)!;
+  return (
+    <section className="fit-check section-shell" id="fit-check">
+      <div className="section-label inverse">FIT CHECK</div>
+      <div className="fit-grid">
+        <div className="fit-intro">
+          <p className="kicker">OPTIONAL FIT CHECK · THREE QUESTIONS</p>
+          <h2>
+            FIND A SIMPLE
+            <br />
+            <span>STARTING ROUTINE.</span>
+          </h2>
+          <p>
+            Use this if you want a suggested route. You can enquire directly at
+            any time; an enquiry is not a payment or confirmed order.
+          </p>
+          <a
+            className="text-action fit-direct-link"
+            href="#enquiry"
+            onClick={() =>
+              trackKleenCarEvent('enquiry_started', { source: 'fit_check' })
+            }
+          >
+            ENQUIRE WITHOUT THE FIT CHECK <ArrowRight aria-hidden="true" />
+          </a>
+        </div>
+        <div className="quiz-panel">
+          {!started && !complete && (
+            <div className="quiz-start">
+              <span className="quiz-index">OPTIONAL · 00 / 03</span>
+              <h3>LET’S MAKE THE FIRST CLEAN SIMPLE.</h3>
+              <p>Every question changes the scope of the suggested routine.</p>
+              <button
+                className="button button-light"
+                type="button"
+                onClick={startQuiz}
+              >
+                START FIT CHECK <ArrowRight aria-hidden="true" />
+              </button>
+            </div>
+          )}
+          {started && !complete && (
+            <div className="quiz-step">
+              <div className="progress-meta">
+                <span>{question.eyebrow}</span>
+                <strong>
+                  {step + 1} / {questions.length}
+                </strong>
+              </div>
+              <div className="progress-track">
+                <span
+                  style={{ width: `${((step + 1) / questions.length) * 100}%` }}
+                />
+              </div>
+              <h3>{question.title}</h3>
+              <p>{question.helper}</p>
+              <div className="choice-grid" aria-label={question.title}>
+                {question.options.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    aria-pressed={answers[question.key] === option}
+                    className={
+                      answers[question.key] === option ? 'selected' : ''
+                    }
+                    onClick={() => choose(option)}
+                  >
+                    <span>{option}</span>
+                    {answers[question.key] === option && (
+                      <Check aria-hidden="true" />
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="quiz-controls">
+                <button
+                  className="back-button"
+                  type="button"
+                  onClick={() => (step === 0 ? reset() : setStep(step - 1))}
+                >
+                  <ArrowLeft aria-hidden="true" /> BACK
+                </button>
+                <button
+                  className="button button-light"
+                  type="button"
+                  disabled={!answers[question.key]}
+                  onClick={next}
+                >
+                  {step === questions.length - 1 ? 'SHOW MY ROUTINE' : 'NEXT'}{' '}
+                  <ArrowRight aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          )}
+          {complete && recommendation && (
+            <div className="recommendation">
+              <span className="quiz-index">YOUR SUGGESTED ROUTINE</span>
+              <p className="recommendation-context">
+                For a {answers.carType?.toLowerCase()} with a{' '}
+                {answers.level?.toLowerCase()} approach:
+              </p>
+              <h3>{selectedSetup}</h3>
+              <p>{packageDetails.descriptor}</p>
+              <div className="setup-switcher" aria-label="Change routine">
+                {SETUPS.map((setup) => (
+                  <button
+                    type="button"
+                    key={setup.name}
+                    className={selectedSetup === setup.name ? 'selected' : ''}
+                    onClick={() => {
+                      setSelectedSetup(setup.name);
+                      trackKleenCarEvent('package_changed', {
+                        package: setup.name,
+                      });
+                    }}
+                  >
+                    <span>{setup.name}</span>
+                    <small>{setup.jobs.length} routine jobs</small>
+                  </button>
+                ))}
+              </div>
+              <p className="routine-summary">
+                This route covers: {packageDetails.jobs.join(' · ')}.
+              </p>
+              <a
+                className="button button-light"
+                href="#enquiry"
+                onClick={() =>
+                  trackKleenCarEvent('enquiry_started', {
+                    package: selectedSetup,
+                    source: 'recommendation',
+                  })
+                }
+              >
+                ASK ABOUT THIS ROUTINE <ArrowRight aria-hidden="true" />
+              </a>
+              <button className="reset-link" type="button" onClick={reset}>
+                START AGAIN
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      <form
+        className="order-card"
+        id="enquiry"
+        onSubmit={submitEnquiry}
+        noValidate
+      >
+        <div className="order-card-heading">
+          <span>ENQUIRY</span>
+          <h3>ASK ABOUT A KIT.</h3>
+          <p>
+            Tell us what you need. An enquiry does not place an order or take
+            payment.
+          </p>
+        </div>
+        <label>
+          YOUR NAME
+          <input
+            required
+            name="name"
+            autoComplete="name"
+            placeholder="Your name"
+          />
+        </label>
+        <label>
+          WHATSAPP NUMBER
+          <input
+            required
+            name="phone"
+            type="tel"
+            autoComplete="tel"
+            inputMode="tel"
+            placeholder="07X XXX XXXX"
+          />
+        </label>
+        <label>
+          AREA
+          <input
+            required
+            name="area"
+            autoComplete="address-level2"
+            placeholder="Your town or area"
+          />
+        </label>
+        <label>
+          INTERESTED IN
+          <select
+            name="setup"
+            value={selectedSetup}
+            onChange={(event) => {
+              const value = event.target.value as SetupName;
+              setSelectedSetup(value);
+              trackKleenCarEvent('package_changed', {
+                package: value,
+                source: 'enquiry_form',
+              });
+            }}
+          >
+            {SETUPS.map((setup) => (
+              <option key={setup.name}>{setup.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="enquiry-message">
+          WHAT WOULD YOU LIKE TO KNOW?
+          <textarea
+            name="message"
+            rows={3}
+            placeholder="For example: what is included, availability, or delivery."
+          />
+        </label>
+        {BUSINESS_DETAILS.privacyUrl && (
+          <p className="privacy-note">
+            We use these details only to reply to this enquiry.{' '}
+            <a href={BUSINESS_DETAILS.privacyUrl}>Read the privacy notice</a>.
+          </p>
+        )}
+        {hasEnquiryEndpoint ? (
+          <button
+            className="button button-primary"
+            type="submit"
+            disabled={enquiryStatus === 'submitting'}
+          >
+            {enquiryStatus === 'submitting' ? 'SENDING…' : 'SEND ENQUIRY'}{' '}
+            <ArrowRight aria-hidden="true" />
+          </button>
+        ) : hasWhatsApp ? (
+          <WhatsAppLink
+            className="button button-primary"
+            kitName={selectedSetup}
+          >
+            ASK ON WHATSAPP <MessageCircle aria-hidden="true" />
+          </WhatsAppLink>
+        ) : null}
+        {enquiryMessage && (
+          <output
+            className={`order-status ${enquiryStatus}`}
+            aria-live="polite"
+          >
+            {enquiryMessage}
+          </output>
+        )}
+      </form>
+    </section>
+  );
+}

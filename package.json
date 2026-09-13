@@ -9,7 +9,7 @@
     "dev": "vinext dev",
     "build": "vite build",
     "start": "wrangler dev --config dist/server/wrangler.json",
-    "lint": "oxlint app components/roadready lib",
+    "lint": "oxlint app components/kleencar lib",
     "format": "oxfmt"
   },
   "dependencies": {
